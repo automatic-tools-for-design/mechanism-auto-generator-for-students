@@ -1,6 +1,86 @@
+from turtledemo.penrose import start
+
 import adsk.core, adsk.fusion, traceback
+import os
+import json
+import math
+
+
+class link:
+    def __init__(self, start,end, width,radius,thickness,rootComp):
+        self.start=start
+        self.end=end
+        self.length = ((start[0]-end[0])**2+(start[1]-end[1])**2)**.5
+        self.width = width
+        self.radius = radius
+        self.root=rootComp
+        self.thickness=thickness
+
+
+    def generate(self):
+        xyPlane = self.root.xYConstructionPlane
+
+        sketch = self.root.sketches.add(xyPlane)
+        y_diff=self.end[1]-self.start[1]
+        x_diff = self.end[0] - self.start[0]
+        angle=math.atan2(y_diff,x_diff)+math.pi/2
+
+        center_point=adsk.core.Point3D.create((self.start[0]+self.end[0])/2, (self.start[1]+self.end[1])/2, 0)
+
+        corner_point1 = adsk.core.Point3D.create(self.start[0] + self.width * math.cos(angle) / 2,
+                                                 self.start[1] + self.width * math.sin(angle) / 2, 0)
+        corner_point2 = adsk.core.Point3D.create(self.start[0] - self.width * math.cos(angle) / 2,
+                                                 self.start[1] - self.width * math.sin(angle) / 2, 0)
+        corner_point3 = adsk.core.Point3D.create(self.end[0] - self.width * math.cos(angle) / 2,
+                                                 self.end[1] - self.width * math.sin(angle) / 2, 0)
+
+
+        # app = adsk.core.Application.get()
+        # ui = app.userInterface
+        # ui.messageBox(f'{[(self.start[0]+self.end[0])/2, (self.start[1]+self.end[1])/2, 0,self.start[0]+self.width*math.cos(angle), self.start[1]+self.width*math.sin(angle), 0]}')
+        sketchLines = sketch.sketchCurves.sketchLines
+        # point1 = adsk.core.Point3D.create(0, 0, 0)
+        # point2 = adsk.core.Point3D.create(self.length, self.width, 0)
+        #sketchLines.addTwoPointRectangle(corner_point1, corner_point3)
+
+
+        sketchLines.addThreePointRectangle(corner_point1,corner_point2,corner_point3)
+
+        sketchCircles = sketch.sketchCurves.sketchCircles
+        center_1 = adsk.core.Point3D.create(self.start[0],self.start[1], 0)
+        center_2 = adsk.core.Point3D.create(self.end[0], self.end[1], 0)
+        sketchCircles.addByCenterRadius(center_1, self.width / 2)
+        sketchCircles.addByCenterRadius(center_1, self.radius)
+        sketchCircles.addByCenterRadius(center_2, self.width / 2)
+        sketchCircles.addByCenterRadius(center_2, self.radius)
+
+        profilesToExtrude = adsk.core.ObjectCollection.create()
+        for idx, profile in enumerate(sketch.profiles):
+            if idx  in [0,1,2,4,6]:
+                profilesToExtrude.add(profile)
+
+        # Get the extrude features collection
+        extrudes = self.root.features.extrudeFeatures
+
+        # Create an ExtrudeFeatureInput
+        extrudeInput = extrudes.createInput(profilesToExtrude, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
+
+        # Define the extrusion distance
+        distance = adsk.fusion.DistanceExtentDefinition.create(adsk.core.ValueInput.createByReal(self.thickness))  # 1 cm extrusion
+        extrudeInput.setOneSideExtent(distance, adsk.fusion.ExtentDirections.PositiveExtentDirection)
+
+        # Create the extrusion
+        extrudes.add(extrudeInput)
+
+
+
+
+
 
 def run(context):
+    script_path = os.path.abspath(__file__)
+    script_directory = os.path.dirname(script_path)
+    os.chdir(script_directory)
     ui = None
     try:
         app = adsk.core.Application.get()
@@ -15,23 +95,21 @@ def run(context):
         # Get the root component
         rootComp = design.rootComponent
 
-        # Define the sketch plane (e.g., XY plane)
-        # You can also select a face or a construction plane
-        xyPlane = rootComp.xYConstructionPlane
+        file_path="linkage_params.json"
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+            start=data.get("start")
+            end=data.get("end")
 
-        # Create a new sketch on the selected plane
-        sketch = rootComp.sketches.add(xyPlane)
 
         # Draw some geometry on the sketch (e.g., a rectangle)
-        sketchLines = sketch.sketchCurves.sketchLines
-        point1 = adsk.core.Point3D.create(0, 0, 0)
-        point2 = adsk.core.Point3D.create(5, 3, 0)
-        sketchLines.addTwoPointRectangle(point1, point2)
+        width=3
+        hole_radius=1
+        thickness=1
+        link1=link(start,end,width,hole_radius,thickness,rootComp)
+        link1.generate()
 
-        # Optionally, add other geometry like circles, arcs, etc.
-        # sketchCircles = sketch.sketchCurves.sketchCircles
-        # centerPoint = adsk.core.Point3D.create(2.5, 1.5, 0)
-        # sketchCircles.addByCenterRadius(centerPoint, 1)
+
 
     except:
         if ui:
