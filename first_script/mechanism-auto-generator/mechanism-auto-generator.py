@@ -56,7 +56,9 @@ class link:
 
         profilesToExtrude = adsk.core.ObjectCollection.create()
         for idx, profile in enumerate(sketch.profiles):
-            if idx  in [0,1,2,4,6]:
+            #todo figure out a better way to do this
+            #if idx in [0,1,2,4,6]: #this does not appear to be consistent and depends on the location of the body
+            if idx <10:
                 profilesToExtrude.add(profile)
 
         # Get the extrude features collection
@@ -98,16 +100,19 @@ def run(context):
         file_path="linkage_params.json"
         with open(file_path, 'r') as file:
             data = json.load(file)
-            start=data.get("start")
-            end=data.get("end")
+            num_links=data.get("num_links")
 
 
         # Draw some geometry on the sketch (e.g., a rectangle)
         width=3
         hole_radius=1
         thickness=1
-        link1=link(start,end,width,hole_radius,thickness,rootComp)
-        link1.generate()
+        for i in range(num_links):
+            linkage_data=data.get(f'Link{i}')
+            start=linkage_data.get("start")
+            end=linkage_data.get("end")
+            link1=link(start,end,width,hole_radius,thickness,rootComp)
+            link1.generate()
 
 
 
