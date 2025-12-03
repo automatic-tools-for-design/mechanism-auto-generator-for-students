@@ -1,6 +1,8 @@
 """This file acts as the main module for this script."""
 
 import traceback
+from sys import intern
+
 import adsk.core
 import adsk.fusion
 import os
@@ -74,7 +76,6 @@ class Link:
             return
 
         pts_xy = [(p.x, p.y) for p in global_pts]
-
         # 2) Radii and thickness (tune as you like)
         link_radius    = 0.5   # outer pad radius
         hole_radius    = 0.25  # joint hole
@@ -210,10 +211,12 @@ class Dyad:
             # internal joint must use same point label on both links
             name_i = joint.pt_i_name
             name_j = joint.pt_j_name
+
             if name_i != name_j:
                 raise RuntimeError(
                     f"Joint {joint.id}: mismatched point labels {name_i} vs {name_j}"
                 )
+
             pivot_name = name_i
 
             # 1) Ground link points: local == global
@@ -227,6 +230,12 @@ class Dyad:
             # Local pivot on crank
             p_c = crank_link.pts[pivot_name]
             uc, vc = p_c.u, p_c.v
+
+            #check if points are actually the same for pivot
+            if xg != uc or yg != vc:
+                raise RuntimeError(
+                    f"cordinates for first dyad do not match"
+                )
 
             # 2) Rotate crank about pivot
             th = float(theta_crank)
@@ -258,6 +267,12 @@ class Dyad:
             L1     = Jint.link_i
             L2     = Jint.link_j
 
+            #so right here it seems like we are using relative cordinates, not absolute ones
+            #int_L1.u, int_L1.v are the values we read off of the JSON file for the first time the joint appears
+            #int_L1.u, int_L1.v are the values we read off of the JSON file for the second time the joint appears
+            #ui.messageBox(f'{int_L1.u, int_L1.v, int_L2.u, int_L2.v}')
+
+
             # ------------------------------------------------------
             # Step 1 — Propagate external joint coords to dyad links
             # ------------------------------------------------------
@@ -269,6 +284,9 @@ class Dyad:
                 elif pj.x is not None and pi.x is None:
                     pi.set_global(pj.x, pj.y)
 
+
+                #these seem to be the first time the joint is found?
+                #ui.messageBox(f'{pi.x, pi.y, pj.x, pj.y}')
             # Helper to find, for a link, which external joint belongs to it
             def ext_point_on(link, ext):
                 if ext.link_i is link:
@@ -335,6 +353,7 @@ class Dyad:
                     )
                 pivot_name = name_i  # same on both links
 
+
                 # 1) Ground link is the inertial frame:
                 #    local coordinates == global coordinates.
                 for p in ground_link.pts.values():
@@ -347,6 +366,11 @@ class Dyad:
                 # Local coordinates of that same logical point on the crank link
                 p_c = crank_link.pts[pivot_name]
                 uc, vc = p_c.u, p_c.v
+
+                #Todo- figure out check for driven link
+
+                # xc, yc = p_c.x, p_c.y
+                # ui.messageBox(f'{xg, yg, uc, vc, xc, yc}')
 
                 # 2) Rotate the crank link about that pivot by theta_crank.
                 theta = float(theta_crank)
@@ -839,13 +863,14 @@ def run(context):
         # -------------------------------
         script_dir = os.path.dirname(__file__)
         #json_path = os.path.join(script_dir, "4BARMECH.json")
-        json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
+        #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
+        json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
             raw = json.load(f)
         mech = Mechanism.from_json(raw)
        
-        mech.postion(theta_crank=math.pi/6)
+        mech.postion(theta_crank=0)
         mech.generate()
         mech.connect()
 
