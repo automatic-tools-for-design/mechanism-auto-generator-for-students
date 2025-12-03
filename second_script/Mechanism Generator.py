@@ -67,7 +67,7 @@ class Link:
             pts=pts
         )
 
-    def generate(self):
+    def generate(self,geometry):
         global root_comp  # use global design component
 
         # 1) Collect points with global coordinates
@@ -77,9 +77,9 @@ class Link:
 
         pts_xy = [(p.x, p.y) for p in global_pts]
         # 2) Radii and thickness (tune as you like)
-        link_radius    = 0.5   # outer pad radius
-        hole_radius    = 0.25  # joint hole
-        link_thickness = 0.5   # extrusion thickness AND plane spacing
+        link_radius    = geometry.link_radius   # outer pad radius
+        hole_radius    = geometry.hole_radius # joint hole
+        link_thickness = geometry.link_thickness   # extrusion thickness AND plane spacing
 
         # 3) Create a new component for this link
         occs = root_comp.occurrences
@@ -411,12 +411,29 @@ class Crank:
         theta0 = data.get("theta0", 0.0)
         return Crank(link, joint, theta0)
 
+class Geometry:
+    def __init__(self, link_radius    = 0.5 , hole_radius    = 0.25, link_thickness = 0.5 ):
+
+        self.link_radius = float(link_radius)
+        self.hole_radius = float(hole_radius)
+        self.link_thickness = float(link_thickness)
+
+
+    @staticmethod
+    def from_json(raw_geometry):
+        link_radius = raw_geometry.get("link_radius", 0.5)
+        hole_radius = raw_geometry.get("hole_radius", 0.25)
+        link_thickness = raw_geometry.get("link_thickness", 0.5)
+        return Geometry(link_radius,hole_radius,link_thickness)
+
+
 class Mechanism:
-    def __init__(self, links, joints, dyads, crank=None):
+    def __init__(self, links, joints, dyads, geometry, crank=None):
         self.links = links        # dict[str : Link]
         self.joints = joints      # dict[str : Joint]
         self.dyads = dyads        # list[Dyad]   <--- ordered list
         self.crank = crank        # Crank or None
+        self.geometry= geometry
 
     @classmethod
     def from_json(cls, raw):
@@ -424,6 +441,12 @@ class Mechanism:
         raw_joints = raw.get("JOINTS", {})
         raw_dyads = raw.get("DYADS", {})
         raw_crank = raw.get("CRANK", None)
+        raw_geometry=raw.get("GEOMETRY",{})
+
+
+
+        geometry=Geometry.from_json(raw_geometry)
+        ui.messageBox(f'{geometry.link_radius}')
 
         # 1. Links
         links = {
@@ -445,7 +468,7 @@ class Mechanism:
         crank = Crank.from_json(raw_crank, links, joints)
 
         # return assembled mechanism
-        return cls(links, joints, dyads, crank)
+        return cls(links, joints, dyads, geometry, crank)
 
     def postion(self, theta_crank):
         """
@@ -472,7 +495,7 @@ class Mechanism:
         This is a stub for now.
         """
         for link in self.links.values():   
-            link.generate()
+            link.generate(self.geometry)
 
     def connect(self):
         """
@@ -860,11 +883,12 @@ def run(context):
 
         # -------------------------------
         # Load external JSON file
+        # Load external JSON file
         # -------------------------------
         script_dir = os.path.dirname(__file__)
-        #json_path = os.path.join(script_dir, "4BARMECH.json")
+        json_path = os.path.join(script_dir, "4BARMECH.json")
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        json_path = os.path.join(script_dir, "Theo_Jansen.json")
+        #json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
             raw = json.load(f)

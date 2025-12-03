@@ -87,5 +87,10 @@
     "link": "L2",
     "joint": "J1",
     "theta0": 30.0
+  },
+    "GEOMETRY": {
+    "link_radius": 0.51,
+    "hole_radius": 0.26,
+    "link_thickness": 0.52
   }
 }
