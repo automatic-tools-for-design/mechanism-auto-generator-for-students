@@ -8,6 +8,7 @@ import adsk.fusion
 import os
 import json
 import math
+import platform
 
 
 # =========================
@@ -881,6 +882,10 @@ def run(context):
 
         root_comp = design.rootComponent
 
+        if platform.system() == 'Windows':
+            downloads_path = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
+        else:
+            downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
         # -------------------------------
         # Load external JSON file
         # Load external JSON file
@@ -897,6 +902,23 @@ def run(context):
         mech.postion(theta_crank=0)
         mech.generate()
         mech.connect()
+
+
+        # create a single exportManager instance
+        exportMgr = design.exportManager
+
+        # export the occurrence one by one in the root component to a specified file
+        allOccu = root_comp.allOccurrences
+        for occ in allOccu:
+            fileName = downloads_path + "/" + occ.component.name
+
+            # create stl exportOptions
+            stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
+            stlExportOptions.sendToPrintUtility = False
+
+            exportMgr.execute(stlExportOptions)
+
+
 
         ui.messageBox(
             "Mechanism parsed successfully!\n\n"
