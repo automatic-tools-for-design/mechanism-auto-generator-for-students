@@ -108,7 +108,16 @@ class Link:
         sketch = comp.sketches.add(sketch_plane)
 
         # 6) Circles at joints (outer stored for outline building)
-        outer_circles = create_joint_circles(sketch, pts_xy, link_radius, hole_radius)
+        if plane_index%2==0: #on even planes create circular holes
+            outer_circles = create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius)
+        elif plane_index%2==1:#on odd planes create square holes
+            outer_circles=create_joint_squares(comp,sketch, pts_xy, link_radius, hole_radius)
+        else:
+            ui.messageBox("error: plane index must be an integer")
+
+        #TODO potential bug here- what if a joint is created between two links that are not in ajacent planes (say planes 0 and 2?) then both holes will be circular
+
+        #TODO potential bug here- what if 3 (or more) joints are colocated at the same point? this could cause issues.
 
         # 7) Outer outline (if only one joint, just pad+hole, no outline)
         if len(pts_xy) > 1:
@@ -117,6 +126,7 @@ class Link:
         # 8) Extrude outer loop minus inner circles INSIDE THIS COMPONENT
         body = extrude_largest_profile(comp, sketch, link_thickness)
         self.body = body
+
 
 class Joint:
     """
@@ -153,6 +163,14 @@ class Joint:
         link_j = links[link_j_id]
 
         return Joint(joint_id, link_i, pt_i_name, link_j, pt_j_name)
+
+    def makepin(self,geometry):
+        #make a pin
+        global root_comp  # use global design component
+
+        link_radius = geometry.link_radius  # outer pad radius
+        hole_radius = geometry.hole_radius  # joint hole
+        link_thickness = geometry.link_thickness  # extrusion thickness AND plane spacing
 
 class Dyad:
     def __init__(self, dyad_id, links, internal_joint, external_joints, solution=1):
@@ -447,7 +465,6 @@ class Mechanism:
 
 
         geometry=Geometry.from_json(raw_geometry)
-        ui.messageBox(f'{geometry.link_radius}')
 
         # 1. Links
         links = {
@@ -498,6 +515,9 @@ class Mechanism:
         for link in self.links.values():   
             link.generate(self.geometry)
 
+        # for joint in self.joint.values():
+        #     joint.makepin(self.geometry)
+
     def connect(self):
         """
         Create Fusion 360 *as-built* revolute joints between link components,
@@ -513,8 +533,11 @@ class Mechanism:
             if link.ground and occ is not None:
                 occ.isGrounded = True
 
+
+
         # 2) For each logical joint in the JSON, create an as-built revolute joint
         for joint in self.joints.values():
+            print(joint)
             link_i = joint.link_i
             link_j = joint.link_j
 
@@ -600,7 +623,7 @@ def outer_tangent_segment(p1, p2, cx, cy, radius):
     t2 = (x2 + nx * radius, y2 + ny * radius)
     return t1, t2
 
-def create_joint_circles(sketch, pts_xy, link_radius, hole_radius):
+def create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius):
     """
     Draw outer + inner circles at joint centers.
     Returns dict[(x,y)] -> outer SketchCircle.
@@ -612,6 +635,36 @@ def create_joint_circles(sketch, pts_xy, link_radius, hole_radius):
         outer = circles.addByCenterRadius(center, link_radius)
         outer_circles[(x, y)] = outer
         circles.addByCenterRadius(center, hole_radius)
+    return outer_circles
+
+def create_joint_squares(comp, sketch,pts_xy, link_radius, hole_radius):
+    """
+    Draw outer circle and inner rectangle
+    Returns dict[(x,y)] -> outer SketchCircle.
+    """
+    circles = sketch.sketchCurves.sketchCircles
+    rectangle=sketch.sketchCurves.sketchLines
+    # axes=comp.constructionAxes
+    # axisInput = axes.createInput()
+    outer_circles = {}
+    for (x, y) in pts_xy:
+        distance=5
+        center = adsk.core.Point3D.create(x, y, 0)
+        center2= adsk.core.Point3D.create(x, y, 1)
+
+        # axisInput.setByTwoPoints(center, center2)
+        # axes.add(axisInput)
+
+        corner1= adsk.core.Point3D.create(x+distance/2, y+distance/2, 0)
+        corner2= adsk.core.Point3D.create(x-distance/2, y-distance/2, 0)
+        outer = circles.addByCenterRadius(center, link_radius)
+
+
+        # axisInput.setByEdge(outer)
+        # axes.add(axisInput)
+
+        outer_circles[(x, y)] = outer
+        rectangle.addTwoPointRectangle(corner1, corner2)
     return outer_circles
 
 def build_link_outline(sketch, pts_xy, link_radius, outer_circles):
@@ -908,15 +961,17 @@ def run(context):
         exportMgr = design.exportManager
 
         # export the occurrence one by one in the root component to a specified file
-        allOccu = root_comp.allOccurrences
-        for occ in allOccu:
-            fileName = downloads_path + "/" + occ.component.name
 
-            # create stl exportOptions
-            stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
-            stlExportOptions.sendToPrintUtility = False
 
-            exportMgr.execute(stlExportOptions)
+        # allOccu = root_comp.allOccurrences
+        # for occ in allOccu:
+        #     fileName = downloads_path + "/" + occ.component.name
+        #
+        #     # create stl exportOptions
+        #     stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
+        #     stlExportOptions.sendToPrintUtility = False
+        #
+        #     exportMgr.execute(stlExportOptions)
 
 
 
