@@ -164,13 +164,88 @@ class Joint:
 
         return Joint(joint_id, link_i, pt_i_name, link_j, pt_j_name)
 
-    def makepin(self,geometry):
+    def makepin(self,idx):
         #make a pin
         global root_comp  # use global design component
 
-        link_radius = geometry.link_radius  # outer pad radius
-        hole_radius = geometry.hole_radius  # joint hole
-        link_thickness = geometry.link_thickness  # extrusion thickness AND plane spacing
+        occs = root_comp.occurrences
+        transform = adsk.core.Matrix3D.create()
+        occ = occs.addNewComponent(transform)
+        comp = occ.component
+
+        base_plane  = comp.xYConstructionPlane
+        sketch_plane = base_plane
+
+        sketch = comp.sketches.add(sketch_plane)
+
+        #key dims
+        width=5
+        snap_thickness=1.5
+        tab_length=1
+        tab_height=2
+        radius=1
+        base_height=8.5
+        length_to_tab=7.5+7.625
+        #location to put pin
+        starting_x=-25-10*idx
+        starting_y=0
+        starting_z=0
+
+        #pick out the key points for generation
+        origin=adsk.core.Point3D.create(starting_x,starting_y,starting_z)
+        p1=adsk.core.Point3D.create(starting_x+width/2,starting_y,starting_z)
+        p1m=adsk.core.Point3D.create(starting_x-width/2,starting_y,starting_z)
+        p2=adsk.core.Point3D.create(starting_x+width/2,starting_y+length_to_tab,starting_z)
+        p2m = adsk.core.Point3D.create(starting_x - width / 2, starting_y + length_to_tab, starting_z)
+        p3=adsk.core.Point3D.create(starting_x+width/2+tab_length,starting_y+length_to_tab,starting_z)
+        p3m = adsk.core.Point3D.create(starting_x - width / 2 - tab_length, starting_y + length_to_tab, starting_z)
+        p4=adsk.core.Point3D.create(starting_x+width/2,starting_y+length_to_tab+tab_height,starting_z)
+        p4m = adsk.core.Point3D.create(starting_x - width / 2, starting_y + length_to_tab + tab_height,
+                                      starting_z)
+
+        p5=adsk.core.Point3D.create(starting_x+width/2-snap_thickness,starting_y+length_to_tab+tab_height,starting_z)
+        p5m = adsk.core.Point3D.create(starting_x - width / 2 + snap_thickness, starting_y + length_to_tab + tab_height,
+                                      starting_z)
+        radius_center=adsk.core.Point3D.create(starting_x,starting_y+base_height+radius,starting_z)
+        p6=adsk.core.Point3D.create(starting_x+radius,starting_y+base_height+radius,starting_z)
+        p6m = adsk.core.Point3D.create(starting_x - radius, starting_y + base_height + radius, starting_z)
+        p7=adsk.core.Point3D.create(starting_x,starting_y+base_height,starting_z)
+
+        #draw straight lines
+        lines=sketch.sketchCurves.sketchLines
+
+        lines.addByTwoPoints(p1,p2)
+        lines.addByTwoPoints(p2, p3)
+        lines.addByTwoPoints(p3, p4)
+        lines.addByTwoPoints(p4, p5)
+        lines.addByTwoPoints(p5, p6)
+
+        #draw the curve
+        arcs=sketch.sketchCurves.sketchArcs
+        arcs.addByCenterStartEnd(radius_center,p6m,p6)
+
+        lines.addByTwoPoints(p5m, p6m)
+        lines.addByTwoPoints(p4m, p5m)
+        lines.addByTwoPoints(p3m, p4m)
+        lines.addByTwoPoints(p2m, p3m)
+        lines.addByTwoPoints(p1m, p2m)
+
+        lines.addByTwoPoints(p1m,p1)
+
+        extrudes = comp.features.extrudeFeatures
+        distance = adsk.core.ValueInput.createByReal(5)
+
+
+        ext_input = extrudes.createInput(
+            sketch.profiles.item(0),
+            adsk.fusion.FeatureOperations.NewBodyFeatureOperation
+        )
+
+        ext_input.setDistanceExtent(False, distance)
+
+        ext = extrudes.add(ext_input)
+
+
 
 class Dyad:
     def __init__(self, dyad_id, links, internal_joint, external_joints, solution=1):
@@ -536,6 +611,7 @@ class Mechanism:
 
 
         # 2) For each logical joint in the JSON, create an as-built revolute joint
+        count=0
         for joint in self.joints.values():
             print(joint)
             link_i = joint.link_i
@@ -569,6 +645,9 @@ class Mechanism:
 
             j = as_built_joints.add(ab_input)
             j.name = joint.id
+
+            joint.makepin(count)
+            count+=1
 
 #======================== Helpers and Globals ========================#
 def centroid(points):
@@ -648,7 +727,7 @@ def create_joint_squares(comp, sketch,pts_xy, link_radius, hole_radius):
     # axisInput = axes.createInput()
     outer_circles = {}
     for (x, y) in pts_xy:
-        distance=5
+        distance=5.125
         center = adsk.core.Point3D.create(x, y, 0)
         center2= adsk.core.Point3D.create(x, y, 1)
 
