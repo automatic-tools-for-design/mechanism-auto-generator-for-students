@@ -1035,9 +1035,9 @@ def run(context):
         # Load external JSON file
         # -------------------------------
         script_dir = os.path.dirname(__file__)
-        #json_path = os.path.join(script_dir, "4BARMECH.json")
+        json_path = os.path.join(script_dir, "4BARMECH.json")
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        json_path = os.path.join(script_dir, "Theo_Jansen.json")
+        #json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
             raw = json.load(f)
@@ -1081,6 +1081,26 @@ def run(context):
             )
         )
 
+
+        result = ui.messageBox(
+            "Do you want to Export STL files of your all parts to the Downloads folder?",
+            "Export STL files",
+            adsk.core.MessageBoxButtonTypes.YesNoButtonType
+        )
+
+        if result==2:
+            allOccu = root_comp.allOccurrences
+            for occ in allOccu:
+                fileName = downloads_path + "/" + occ.component.name
+
+                # create stl exportOptions
+                stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
+                stlExportOptions.sendToPrintUtility = False
+
+                exportMgr.execute(stlExportOptions)
+            ui.messageBox(f'Files exported - script complete')
+        elif result==3:
+            ui.messageBox(f'Script complete')
     except:  
         if ui:
             ui.messageBox("Error:\n{}".format(traceback.format_exc()))
