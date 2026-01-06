@@ -87,6 +87,7 @@ class Link:
         transform = adsk.core.Matrix3D.create()
         occ = occs.addNewComponent(transform)
         comp = occ.component
+        comp.name=f'Link {self.id}'
         self.component = comp   # store for later (joints)
         self.occurrence = occ        # ⬅️ important: used by connect()
         self.body = None        # will fill in after extrude
@@ -163,7 +164,7 @@ class Joint:
 
         return Joint(joint_id, link_i, pt_i_name, link_j, pt_j_name)
 
-    def makepin(self,idx,num_links,geometry):
+    def makepin(self,idx,num_links,name,geometry):
         #make a pin
         global root_comp  # use global design component
 
@@ -171,6 +172,7 @@ class Joint:
         transform = adsk.core.Matrix3D.create()
         occ = occs.addNewComponent(transform)
         comp = occ.component
+        comp.name=f'Joint {name}'
 
         base_plane  = comp.xYConstructionPlane
         planes = comp.constructionPlanes
@@ -620,7 +622,8 @@ class Mechanism:
         counts = Counter(joint_list)
         num_pins=0
         for item in counts:
-            joint.makepin(num_pins,counts[item],self.geometry)
+
+            joint.makepin(num_pins,counts[item],item,self.geometry)
             num_pins+=1
 
         for joint in self.joints.values():
@@ -1035,9 +1038,9 @@ def run(context):
         # Load external JSON file
         # -------------------------------
         script_dir = os.path.dirname(__file__)
-        json_path = os.path.join(script_dir, "4BARMECH.json")
+        #json_path = os.path.join(script_dir, "4BARMECH.json")
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        #json_path = os.path.join(script_dir, "Theo_Jansen.json")
+        json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
             raw = json.load(f)
@@ -1048,21 +1051,7 @@ def run(context):
         mech.connect()
 
 
-        # create a single exportManager instance
-        exportMgr = design.exportManager
 
-        # export the occurrence one by one in the root component to a specified file
-
-
-        # allOccu = root_comp.allOccurrences
-        # for occ in allOccu:
-        #     fileName = downloads_path + "/" + occ.component.name
-        #
-        #     # create stl exportOptions
-        #     stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
-        #     stlExportOptions.sendToPrintUtility = False
-        #
-        #     exportMgr.execute(stlExportOptions)
 
 
 
@@ -1089,6 +1078,8 @@ def run(context):
         )
 
         if result==2:
+            # create a single exportManager instance
+            exportMgr = design.exportManager
             allOccu = root_comp.allOccurrences
             for occ in allOccu:
                 fileName = downloads_path + "/" + occ.component.name
