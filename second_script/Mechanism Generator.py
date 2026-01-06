@@ -9,7 +9,7 @@ import os
 import json
 import math
 import platform
-
+from collections import Counter
 
 # =========================
 #  Core data structures
@@ -164,7 +164,7 @@ class Joint:
 
         return Joint(joint_id, link_i, pt_i_name, link_j, pt_j_name)
 
-    def makepin(self,idx):
+    def makepin(self,idx,num_links,geometry):
         #make a pin
         global root_comp  # use global design component
 
@@ -184,8 +184,8 @@ class Joint:
         tab_length=1
         tab_height=2
         radius=1
-        base_height=8.5
-        length_to_tab=7.5+7.625
+        base_height=1+geometry.link_thickness*num_links
+        length_to_tab=7.625+geometry.link_thickness*num_links
         #location to put pin
         starting_x=-25-10*idx
         starting_y=0
@@ -590,8 +590,6 @@ class Mechanism:
         for link in self.links.values():   
             link.generate(self.geometry)
 
-        # for joint in self.joint.values():
-        #     joint.makepin(self.geometry)
 
     def connect(self):
         """
@@ -611,9 +609,18 @@ class Mechanism:
 
 
         # 2) For each logical joint in the JSON, create an as-built revolute joint
-        count=0
+        joint_list=[]
         for joint in self.joints.values():
-            print(joint)
+            joint_list.append(joint.pt_j_name)
+
+        counts = Counter(joint_list)
+        num_pins=0
+        for item in counts:
+            joint.makepin(num_pins,counts[item],self.geometry)
+            num_pins+=1
+
+        for joint in self.joints.values():
+            #print(joint)
             link_i = joint.link_i
             link_j = joint.link_j
 
@@ -646,8 +653,7 @@ class Mechanism:
             j = as_built_joints.add(ab_input)
             j.name = joint.id
 
-            joint.makepin(count)
-            count+=1
+
 
 #======================== Helpers and Globals ========================#
 def centroid(points):
@@ -1023,9 +1029,9 @@ def run(context):
         # Load external JSON file
         # -------------------------------
         script_dir = os.path.dirname(__file__)
-        json_path = os.path.join(script_dir, "4BARMECH.json")
+        #json_path = os.path.join(script_dir, "4BARMECH.json")
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        #json_path = os.path.join(script_dir, "Theo_Jansen.json")
+        json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
             raw = json.load(f)
@@ -1072,3 +1078,4 @@ def run(context):
     except:  
         if ui:
             ui.messageBox("Error:\n{}".format(traceback.format_exc()))
+

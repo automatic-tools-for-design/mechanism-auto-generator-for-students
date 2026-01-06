@@ -17,27 +17,27 @@
     },
     "L4": {
       "ground": false,
-      "plane": 1,
+      "plane": 3,
       "pts": { "B": [0,0],  "C": [0, 41.5] , "D": [-40.1,0] }
     },
         "L5": {
       "ground": false,
-      "plane": 1,
+      "plane": 4,
       "pts": { "A": [0,0],  "E": [0, -62] }
     },
         "L6": {
       "ground": false,
-      "plane": 1,
+      "plane": 5,
       "pts": { "B": [0,0],  "E": [0, 39.3] }
     },
             "L7": {
       "ground": false,
-      "plane": 1,
+      "plane": 6,
       "pts": { "D": [0,0],  "F": [0, -39.4] }
     },
             "L8": {
       "ground": false,
-      "plane": 1,
+      "plane": 7,
       "pts": { "E": [0,0],  "F": [-36.7, 0], "G": [0, -49.0]}
     }
   },
@@ -89,8 +89,8 @@
     "theta0": 30.0
   },
     "GEOMETRY": {
-    "link_radius": 0.51,
-    "hole_radius": 0.26,
-    "link_thickness": 0.52
+    "link_radius": 5,
+    "hole_radius": 3.75,
+    "link_thickness": 7.5
   }
 }
