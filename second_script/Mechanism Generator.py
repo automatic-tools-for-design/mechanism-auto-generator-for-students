@@ -173,7 +173,12 @@ class Joint:
         comp = occ.component
 
         base_plane  = comp.xYConstructionPlane
-        sketch_plane = base_plane
+        planes = comp.constructionPlanes
+        offset_val = adsk.core.ValueInput.createByReal(-2 * geometry.link_thickness)
+        p_input = planes.createInput()
+        p_input.setByOffset(base_plane, offset_val)
+        sketch_plane = planes.add(p_input)
+
 
         sketch = comp.sketches.add(sketch_plane)
 
@@ -232,7 +237,7 @@ class Joint:
         lines.addByTwoPoints(p1m,p1)
 
         extrudes = comp.features.extrudeFeatures
-        distance = adsk.core.ValueInput.createByReal(5)
+        distance = adsk.core.ValueInput.createByReal(geometry.link_thickness)
 
 
         ext_input = extrudes.createInput(
