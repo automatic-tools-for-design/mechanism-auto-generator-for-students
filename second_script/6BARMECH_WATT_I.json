@@ -67,8 +67,8 @@
     "theta0": 0.0
   },
       "GEOMETRY": {
-    "link_radius": 8,
-    "hole_radius": 0.25,
-    "link_thickness": 1
+    "link_radius": 5,
+    "hole_radius": 3.75,
+    "link_thickness": 7.5
   }
 }

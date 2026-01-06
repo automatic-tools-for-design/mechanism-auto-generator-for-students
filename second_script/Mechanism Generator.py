@@ -108,10 +108,8 @@ class Link:
         sketch = comp.sketches.add(sketch_plane)
 
         # 6) Circles at joints (outer stored for outline building)
-        if plane_index%2==0: #on even planes create circular holes
+        if plane_index%1==0: #on even planes create circular holes
             outer_circles = create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius)
-        elif plane_index%2==1:#on odd planes create square holes
-            outer_circles=create_joint_squares(comp,sketch, pts_xy, link_radius, hole_radius)
         else:
             ui.messageBox("error: plane index must be an integer")
 
@@ -125,6 +123,7 @@ class Link:
 
         # 8) Extrude outer loop minus inner circles INSIDE THIS COMPONENT
         body = extrude_largest_profile(comp, sketch, link_thickness)
+        outer_circles = create_joint_squares(sketch, pts_xy, link_radius, hole_radius) #draws square that can be extruded later if needed
         self.body = body
 
 
@@ -634,6 +633,8 @@ class Mechanism:
             edge_i = find_joint_hole_edge(link_i, joint.pt_i)
             edge_j = find_joint_hole_edge(link_j, joint.pt_j)
 
+
+
             # Prefer an edge from link_j if available; otherwise use link_i
             edge_axis = edge_j or edge_i
             if edge_axis is None:
@@ -722,7 +723,7 @@ def create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius):
         circles.addByCenterRadius(center, hole_radius)
     return outer_circles
 
-def create_joint_squares(comp, sketch,pts_xy, link_radius, hole_radius):
+def create_joint_squares(sketch,pts_xy, link_radius, hole_radius):
     """
     Draw outer circle and inner rectangle
     Returns dict[(x,y)] -> outer SketchCircle.
@@ -733,7 +734,7 @@ def create_joint_squares(comp, sketch,pts_xy, link_radius, hole_radius):
     # axisInput = axes.createInput()
     outer_circles = {}
     for (x, y) in pts_xy:
-        distance=5.125
+        distance=5.125 #if we change the hole radius, this should change as well
         center = adsk.core.Point3D.create(x, y, 0)
         center2= adsk.core.Point3D.create(x, y, 1)
 
