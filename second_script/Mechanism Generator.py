@@ -127,7 +127,6 @@ class Link:
         outer_circles = create_joint_squares(sketch, pts_xy, link_radius, hole_radius) #draws square that can be extruded later if needed
         self.body = body
 
-
 class Joint:
     """
     Joint connecting:
@@ -251,31 +250,39 @@ class Joint:
 
         ext = extrudes.add(ext_input)
 
+class Group:
+    """
+    Base class for mechanism groups (dyad, classIII, classIV, ...).
+    Provides a factory that returns the right derived class based on JSON "type".
+    """
+    TYPE_MAP = {}  # filled after class definitions
 
-
-class Dyad:
-    def __init__(self, dyad_id, links, internal_joint, external_joints, solution=1):
-        self.id = dyad_id
-        self.links = links              # list[Link]
-        self.internal = internal_joint  # Joint
-        self.external = external_joints # list[Joint]
-        self.solution = solution        # +1 or -1 for circle–circle intersection
+    def __init__(self, group_id, links, internal_joint=None, external_joints=None, solution=1):
+        self.id = group_id
+        self.links = links
+        self.internal = internal_joint
+        self.external = external_joints if external_joints is not None else []
+        self.solution = solution
 
     @staticmethod
-    def from_json(dyad_id, data, links, joints):
-        """
-        data:
-          {
-            "links": ["L1", "L2"],
-            "internal": "J1",
-            "external": ["J0", ...]
-          }
-        """
-        link_objs = [links[lid] for lid in data.get("links", [])]
-        internal_joint = joints[data["internal"]]
-        external_joints = [joints[jid] for jid in data.get("external", [])]
-        solution = data["solution"] if "solution" in data else 1
+    def from_json(group_id, data, links, joints):
+        gtype = data.get("type", "dyad")  # default to dyad if omitted
+        cls = Group.TYPE_MAP.get(gtype)
+        if cls is None:
+            raise ValueError(f'Unknown group type "{gtype}" in GROUPS["{group_id}"]')
+        return cls._from_json(group_id, data, links, joints)
 
+    @staticmethod
+    def _from_json(group_id, data, links, joints):
+        raise NotImplementedError
+    
+class Dyad(Group):
+    @staticmethod
+    def _from_json(dyad_id, data, links, joints):
+        link_objs = [links[lid] for lid in data.get("links", [])]
+        internal_joint = joints[data["internal"]] if "internal" in data else None
+        external_joints = [joints[jid] for jid in data.get("external", [])]
+        solution = data.get("solution", 1)
         return Dyad(dyad_id, link_objs, internal_joint, external_joints, solution)
     
     def solve_position(self, theta_crank=None):
@@ -427,66 +434,12 @@ class Dyad:
             ground_links = [lk for lk in self.links if lk.ground]
             moving_links = [lk for lk in self.links if not lk.ground]
 
-            is_driving = (len(ground_links) == 1) and (len(moving_links) == 1)
+    
+    # Register concrete group types (keep it simple, no decorators)
 
-            if is_driving:
-                # Driving dyad special case:
-                # - Exactly one ground link (inertial frame)
-                # - One moving link (crank)
-                # - Known crank angle theta_crank
-                # - Internal joint is the pivot between them
-                if theta_crank is None:
-                    raise RuntimeError("Driving dyad requires theta_crank to solve position.")
-                
-                ground_link = ground_links[0]
-                crank_link = moving_links[0]
-                joint = self.internal
-
-                # By your convention, the joint always connects
-                # the SAME point name on both links.
-                name_i = joint.pt_i_name
-                name_j = joint.pt_j_name
-                if name_i != name_j:
-                    raise RuntimeError(
-                        f"Joint {joint.id} does not have matching point labels: "
-                        f'{name_i} vs {name_j}'
-                    )
-                pivot_name = name_i  # same on both links
-
-
-                # 1) Ground link is the inertial frame:
-                #    local coordinates == global coordinates.
-                for p in ground_link.pts.values():
-                    p.set_global(p.u, p.v)
-
-                # Global coordinates of the joint/pivot on the ground link
-                p_g = ground_link.pts[pivot_name]
-                xg, yg = p_g.x, p_g.y   # typically (0, 0) in your example
-
-                # Local coordinates of that same logical point on the crank link
-                p_c = crank_link.pts[pivot_name]
-                uc, vc = p_c.u, p_c.v
-
-                #Todo- figure out check for driven link
-
-                # xc, yc = p_c.x, p_c.y
-                # ui.messageBox(f'{xg, yg, uc, vc, xc, yc}')
-
-                # 2) Rotate the crank link about that pivot by theta_crank.
-                theta = float(theta_crank)
-                c = math.cos(theta)
-                s = math.sin(theta)
-
-                # For any point p on the crank:
-                #   local delta from pivot: (u - uc, v - vc)
-                #   rotate that delta, then add pivot global (xg, yg):
-                #   [x; y] = [xg; yg] + R(theta) * [u - uc; v - vc]
-                for p in crank_link.pts.values():
-                    du = p.u - uc
-                    dv = p.v - vc
-                    x = xg + c * du - s * dv
-                    y = yg + s * du + c * dv
-                    p.set_global(x, y)
+Group.TYPE_MAP = {
+    "dyad": Dyad,
+}
 
 class Crank:
     def __init__(self, link, joint, theta0):
@@ -526,12 +479,11 @@ class Geometry:
         link_thickness = raw_geometry.get("link_thickness", 0.5)
         return Geometry(link_radius,hole_radius,link_thickness)
 
-
 class Mechanism:
-    def __init__(self, links, joints, dyads, geometry, crank=None):
+    def __init__(self, links, joints, groups, geometry, crank=None):
         self.links = links        # dict[str : Link]
         self.joints = joints      # dict[str : Joint]
-        self.dyads = dyads        # list[Dyad]   <--- ordered list
+        self.groups = groups        # list[Dyad]   <--- ordered list
         self.crank = crank        # Crank or None
         self.geometry= geometry
 
@@ -539,11 +491,9 @@ class Mechanism:
     def from_json(cls, raw):
         raw_links = raw.get("LINKS", {})
         raw_joints = raw.get("JOINTS", {})
-        raw_dyads = raw.get("DYADS", {})
+        raw_groups = raw.get("GROUPS", {})
         raw_crank = raw.get("CRANK", None)
         raw_geometry=raw.get("GEOMETRY",{})
-
-
 
         geometry=Geometry.from_json(raw_geometry)
 
@@ -557,17 +507,17 @@ class Mechanism:
             jid: Joint.from_json(jid, jdata, links) for jid, jdata in raw_joints.items()
         }
 
-        # 3. Dyads (ordered list!)
-        dyads = []
-        for did, ddata in raw_dyads.items():   # preserves JSON order
-            dyad = Dyad.from_json(did, ddata, links, joints)
-            dyads.append(dyad)
+        # 3. Groups (ordered list!)
+        groups = []
+        for did, ddata in raw_groups.items():   # preserves JSON order
+            group = Group.from_json(did, ddata, links, joints)
+            groups.append(group)
 
         # 4. Crank
         crank = Crank.from_json(raw_crank, links, joints)
 
         # return assembled mechanism
-        return cls(links, joints, dyads, geometry, crank)
+        return cls(links, joints, groups, geometry, crank)
 
     def postion(self, theta_crank):
         """
@@ -579,13 +529,13 @@ class Mechanism:
           - Otherwise, invoke the ordinary dyad position solver
             (to be implemented) which uses external joints.
         """
-        for i, dyad in enumerate(self.dyads):
+        for i, groups in enumerate(self.groups):
             if i == 0:
                 # Driving dyad: use given crank angle
-                dyad.solve_position(theta_crank=theta_crank)
+                groups.solve_position(theta_crank=theta_crank)
             else:
                 # Ordinary dyads: cascade P-problem (stub for now)
-                dyad.solve_position()
+                groups.solve_position()
 
     def generate(self):
         """
@@ -595,7 +545,6 @@ class Mechanism:
         """
         for link in self.links.values():   
             link.generate(self.geometry)
-
 
     def connect(self):
         """
@@ -661,7 +610,6 @@ class Mechanism:
 
             j = as_built_joints.add(ab_input)
             j.name = joint.id
-
 
 
 #======================== Helpers and Globals ========================#
@@ -1064,7 +1012,7 @@ def run(context):
             "Crank A: {}\n".format(
                 len(mech.links),
                 len(mech.joints),
-                len(mech.dyads),
+                len(mech.groups),
                 "Yes" if mech.crank is not None else "No",
                 str(mech.crank.link.pts["A"].x) + ", " + str(mech.crank.link.pts["A"].y) if mech.crank is not None else "N/A"
             )

@@ -29,13 +29,15 @@
     "J4": [["L4", "04"], ["L1", "04"]]
   },
 
-  "DYADS": {
-    "D0": {
+  "GROUPS": {
+    "G0": {
+      "type":"dyad",
       "links": ["L1", "L2"],
       "internal": "J1",
       "solution": 1
     },
-    "D1": {
+    "G1": {
+      "type":"dyad",
       "links": ["L2", "L3"],
       "internal": "J3",
       "external": ["J2", "J4"],
@@ -48,7 +50,7 @@
     "joint": "J1",
     "theta0": 0.0
   },
-        "GEOMETRY": {
+  "GEOMETRY": {
     "link_radius": 5,
     "hole_radius": 3.75,
     "link_thickness": 7.5

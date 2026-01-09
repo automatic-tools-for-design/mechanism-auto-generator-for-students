@@ -57,25 +57,29 @@
     "J10": [["L8", "E"], ["L6", "E"]]
   },
 
-  "DYADS": {
-    "D0": {
+  "GROUPS": {
+    "G0": {
+      "type":"dyad",
       "links": ["L1", "L2"],
       "internal": "J1",
       "solution": -1
     },
-    "D1": {
+    "G1": {
+      "type":"dyad",
       "links": ["L3", "L4"],
       "internal": "J3",
       "external": ["J2", "J4"],
       "solution": -1
     },
-    "D2": {
+    "G2": {
+      "type":"dyad",
       "links": ["L5", "L6"],
       "internal": "J6",
       "external": ["J5", "J7"],
       "solution": 1
     },
-        "D3": {
+      "G3": {
+      "type":"dyad",
       "links": ["L7", "L8"],
       "internal": "J9",
       "external": ["J8", "J10"],
