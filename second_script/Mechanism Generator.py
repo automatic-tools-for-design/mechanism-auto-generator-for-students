@@ -257,12 +257,13 @@ class Group:
     """
     TYPE_MAP = {}  # filled after class definitions
 
-    def __init__(self, group_id, links, internal_joint=None, external_joints=None, solution=1):
+    def __init__(self, group_id, links, internal=None, external=None, solution=1):
         self.id = group_id
         self.links = links
-        self.internal = internal_joint
-        self.external = external_joints if external_joints is not None else []
-        self.solution = solution
+        # internal/external are LISTS for every group type
+        self.internal = internal if internal is not None else []
+        self.external = external if external is not None else []
+        self.solution = int(solution)
 
     @staticmethod
     def from_json(group_id, data, links, joints):
@@ -280,10 +281,15 @@ class Dyad(Group):
     @staticmethod
     def _from_json(dyad_id, data, links, joints):
         link_objs = [links[lid] for lid in data.get("links", [])]
-        internal_joint = joints[data["internal"]] if "internal" in data else None
-        external_joints = [joints[jid] for jid in data.get("external", [])]
+
+        internal = []
+        if "internal" in data:
+            internal = [joints[data["internal"]]]   # <- list of 1
+
+        external = [joints[jid] for jid in data.get("external", [])]
+
         solution = data.get("solution", 1)
-        return Dyad(dyad_id, link_objs, internal_joint, external_joints, solution)
+        return Dyad(dyad_id, link_objs, internal=internal, external=external, solution=solution)
     
     def solve_position(self, theta_crank=None):
         """
@@ -313,7 +319,7 @@ class Dyad(Group):
 
             ground_link = ground_links[0]
             crank_link  = moving_links[0]
-            joint       = self.internal
+            joint = self.internal[0]
 
             # internal joint must use same point label on both links
             name_i = joint.pt_i_name
@@ -366,7 +372,12 @@ class Dyad(Group):
 
             ext1 = self.external[0]
             ext2 = self.external[1]
-            Jint = self.internal
+
+            # internal is a list (by design). Dyad has exactly one internal joint.
+            if len(self.internal) != 1:
+                raise RuntimeError(f"Dyad {self.id}: expected exactly 1 internal joint, got {len(self.internal)}")
+
+            Jint = self.internal[0]   # <-- FIX
 
             # Internal joint points on the two links
             int_L1 = Jint.pt_i
@@ -437,8 +448,311 @@ class Dyad(Group):
     
     # Register concrete group types (keep it simple, no decorators)
 
+class ClassIV(Group):
+    @staticmethod
+    def _from_json(gid, data, links, joints):
+        link_objs = [links[lid] for lid in data.get("links", [])]
+
+        internal = [joints[jid] for jid in data.get("internal", [])]  # list of Joint
+        external = [joints[jid] for jid in data.get("external", [])]  # list of Joint
+
+        solution = data.get("solution", 1)
+        return ClassIV(gid, link_objs, internal=internal, external=external, solution=solution)
+
+    def solve_position(self, theta_crank=None):
+        # -----------------------------
+        # 0) Basic validation
+        # -----------------------------
+        group_links = list(self.links)
+        group_links_set = set(group_links)
+
+        internal_joints = list(self.internal)
+        external_joints = list(self.external)
+
+        if len(group_links) != 4:
+            raise RuntimeError(f"ClassIV {self.id}: expected 4 links, got {len(group_links)}")
+        if len(internal_joints) != 4:
+            raise RuntimeError(f"ClassIV {self.id}: expected 4 internal joints, got {len(internal_joints)}")
+        if len(external_joints) != 2:
+            raise RuntimeError(f"ClassIV {self.id}: expected 2 external joints, got {len(external_joints)}")
+
+        # -----------------------------
+        # 1) Propagate known external joint global coords
+        #    (at least one side of each external joint should already be known)
+        # -----------------------------
+        for J in external_joints:
+            pi = J.pt_i
+            pj = J.pt_j
+            if pi.x is not None and pj.x is None:
+                pj.set_global(pi.x, pi.y)
+            elif pj.x is not None and pi.x is None:
+                pi.set_global(pj.x, pj.y)
+
+        # After propagation, the point on the GROUP link side must be known:
+        ext_inside = []
+        for J in external_joints:
+            lk_in = group_side_link_of_external_joint(J, group_links_set)
+            if lk_in is None:
+                raise RuntimeError(f"ClassIV {self.id}: external joint {J.id} does not touch any group link.")
+            p_in = point_on_link(J, lk_in)
+            if p_in is None or p_in.x is None:
+                raise RuntimeError(f"ClassIV {self.id}: external joint {J.id} group-side point has no global coords.")
+            ext_inside.append((J, lk_in, p_in))
+
+        # -----------------------------
+        # 2) Compute degrees within the group (internal + external)
+        #    Identify ternaries (deg=3) and binaries (deg=2)
+        # -----------------------------
+        deg = {lk.id: 0 for lk in group_links}
+        for J in internal_joints + external_joints:
+            if J.link_i.id in deg: deg[J.link_i.id] += 1
+            if J.link_j.id in deg: deg[J.link_j.id] += 1
+
+        vals = sorted(deg.values())
+        if vals != [2, 2, 3, 3]:
+            raise RuntimeError(
+                f"ClassIV {self.id}: expected degrees [2,2,3,3], got {vals}. "
+                + "Degrees: " + ", ".join([f"{k}:{v}" for k, v in deg.items()])
+            )
+
+        ternaries = [lk for lk in group_links if deg[lk.id] == 3]
+        binaries  = [lk for lk in group_links if deg[lk.id] == 2]
+
+        # -----------------------------
+        # 3) Determine which ternary corresponds to which external pivot
+        #    (each external joint attaches to exactly one group link; should be ternary)
+        # -----------------------------
+        # Map: ternary -> (external_joint, external_point_on_ternary)
+        ternary_ext = {}
+        for (J, lk_in, p_in) in ext_inside:
+            if lk_in not in ternaries:
+                # In a valid Class IV Watt group, externals hit ternaries.
+                # If not, it's a different topology than this solver assumes.
+                raise RuntimeError(
+                    f"ClassIV {self.id}: external joint {J.id} attaches to non-ternary link {lk_in.id}."
+                )
+            ternary_ext[lk_in] = (J, p_in)
+
+        if len(ternary_ext) != 2:
+            raise RuntimeError(f"ClassIV {self.id}: expected external joints to hit the two ternaries (got {len(ternary_ext)}).")
+
+        T1, T2 = list(ternary_ext.keys())
+        Jext1, P1 = ternary_ext[T1][0], ternary_ext[T1][1]  # P1 is Point2D on T1 with global known
+        Jext2, P2 = ternary_ext[T2][0], ternary_ext[T2][1]
+
+        P1_xy = (P1.x, P1.y)
+        P2_xy = (P2.x, P2.y)
+
+        # -----------------------------
+        # 4) Build incidence: for each binary link, find the two internal joints that connect it to the ternaries
+        # -----------------------------
+        # For each binary link, collect internal joints touching it
+        bin_to_internal = {b: [] for b in binaries}
+        for J in internal_joints:
+            if J.link_i in bin_to_internal:
+                bin_to_internal[J.link_i].append(J)
+            if J.link_j in bin_to_internal:
+                bin_to_internal[J.link_j].append(J)
+
+        # Each binary should have exactly 2 internal joints (to the two ternaries)
+        for b in binaries:
+            if len(bin_to_internal[b]) != 2:
+                raise RuntimeError(
+                    f"ClassIV {self.id}: binary link {b.id} does not have exactly 2 internal joints inside group."
+                )
+
+        # Choose cut vs remaining binary deterministically (by id)
+        binaries_sorted = sorted(binaries, key=lambda lk: lk.id)
+        B_cut = binaries_sorted[0]
+        B_rem = binaries_sorted[1]
+
+        # For each ternary, find its joint to B_cut and to B_rem
+        def internal_joint_between(link_a, link_b):
+            for J in internal_joints:
+                if (J.link_i is link_a and J.link_j is link_b) or (J.link_j is link_a and J.link_i is link_b):
+                    return J
+            return None
+
+        J_T1_cut = internal_joint_between(T1, B_cut)
+        J_T2_cut = internal_joint_between(T2, B_cut)
+        J_T1_rem = internal_joint_between(T1, B_rem)
+        J_T2_rem = internal_joint_between(T2, B_rem)
+
+        if None in [J_T1_cut, J_T2_cut, J_T1_rem, J_T2_rem]:
+            raise RuntimeError(f"ClassIV {self.id}: could not identify required internal joints for cut/rem binaries.")
+
+        # Points on ternaries for those joints
+        T1_cut_pt = point_on_link(J_T1_cut, T1)
+        T2_cut_pt = point_on_link(J_T2_cut, T2)
+        T1_rem_pt = point_on_link(J_T1_rem, T1)
+        T2_rem_pt = point_on_link(J_T2_rem, T2)
+
+        # Points on binaries for those joints (useful for lengths)
+        Bcut_pt1 = point_on_link(J_T1_cut, B_cut)
+        Bcut_pt2 = point_on_link(J_T2_cut, B_cut)
+        Brem_pt1 = point_on_link(J_T1_rem, B_rem)
+        Brem_pt2 = point_on_link(J_T2_rem, B_rem)
+
+        # -----------------------------
+        # 5) Known lengths from LOCAL geometry (no labels)
+        # -----------------------------
+        # - ground length between external pivots is known in global (but not needed as "length")
+        # - r1: distance on T1 from external pivot point to its rem joint (LOCAL)
+        # - r2: distance on T2 from external pivot point to its rem joint (LOCAL)
+        # - L_rem: length of remaining binary (LOCAL)
+        # - L_cut: length of cut binary (LOCAL)
+        P1_local = P1  # Point2D on T1 (has u,v and x,y)
+        P2_local = P2  # Point2D on T2
+
+        r1 = math.hypot(T1_rem_pt.u - P1_local.u, T1_rem_pt.v - P1_local.v)
+        r2 = math.hypot(T2_rem_pt.u - P2_local.u, T2_rem_pt.v - P2_local.v)
+
+        L_rem = math.hypot(Brem_pt2.u - Brem_pt1.u, Brem_pt2.v - Brem_pt1.v)
+        L_cut = math.hypot(Bcut_pt2.u - Bcut_pt1.u, Bcut_pt2.v - Bcut_pt1.v)
+
+        # Local direction vector on T1 from external pivot to rem joint
+        v1x = T1_rem_pt.u - P1_local.u
+        v1y = T1_rem_pt.v - P1_local.v
+
+        # -----------------------------
+        # 6) Define closure error f(phi):
+        #    - rotate T1 about P1 by phi -> gives Q1 (T1_rem global)
+        #    - solve Q2 (T2_rem global) from circle-circle intersection:
+        #          |Q2 - P2| = r2
+        #          |Q2 - Q1| = L_rem
+        #    - then both ternary poses are known (from two points each)
+        #    - compute cut joint points global and check:
+        #          |T1_cut - T2_cut| == L_cut
+        # -----------------------------
+        sol_sign = 1 if int(self.solution) >= 0 else -1
+
+        def eval_f(phi):
+            # Q1 from rotating T1's local vector v1 around P1 global
+            rvx, rvy = rot2(phi, v1x, v1y)
+            Q1x = P1_xy[0] + rvx
+            Q1y = P1_xy[1] + rvy
+
+            # Solve Q2 from intersection of circles:
+            # circle 1: center Q1 radius L_rem
+            # circle 2: center P2 radius r2
+            sol = circle_circle_intersection(Q1x, Q1y, L_rem, P2_xy[0], P2_xy[1], r2, solution=sol_sign)
+            if sol is None:
+                return None, None  # invalid phi (no assembly)
+            Q2x, Q2y = sol
+
+            # Set globals for the two defining points on T1, solve its pose
+            T1_ext_pt = P1_local
+            T1_ext_pt.set_global(P1_xy[0], P1_xy[1])
+            T1_rem_pt.set_global(Q1x, Q1y)
+            ok1 = solve_link_pose_from_two_points(T1, T1_ext_pt, T1_rem_pt)
+            if not ok1:
+                return None, None
+
+            # Set globals for the two defining points on T2, solve its pose
+            T2_ext_pt = P2_local
+            T2_ext_pt.set_global(P2_xy[0], P2_xy[1])
+            T2_rem_pt.set_global(Q2x, Q2y)
+            ok2 = solve_link_pose_from_two_points(T2, T2_ext_pt, T2_rem_pt)
+            if not ok2:
+                return None, None
+
+            # Now cut joint points on ternaries have global coords
+            d = math.hypot(T1_cut_pt.x - T2_cut_pt.x, T1_cut_pt.y - T2_cut_pt.y)
+            return (d - L_cut), (Q1x, Q1y, Q2x, Q2y)
+
+        # -----------------------------
+        # 7) Find phi that makes f(phi)=0
+        #    Simple scan for a bracket, then bisection
+        # -----------------------------
+        samples = 90
+        phis = [2.0 * math.pi * i / samples for i in range(samples + 1)]
+        vals = []
+        best = None  # (absf, phi, aux)
+        for phi in phis:
+            f, aux = eval_f(phi)
+            if f is None:
+                vals.append(None)
+                continue
+            vals.append(f)
+            af = abs(f)
+            if best is None or af < best[0]:
+                best = (af, phi, aux)
+
+        # Try to bracket a sign change
+        bracket = None
+        for i in range(samples):
+            f0 = vals[i]
+            f1 = vals[i+1]
+            if f0 is None or f1 is None:
+                continue
+            if f0 == 0.0:
+                bracket = (phis[i], phis[i])
+                break
+            if f0 * f1 < 0:
+                bracket = (phis[i], phis[i+1])
+                break
+
+        if bracket is None:
+            # No sign change found; use the best phi we saw (closest closure)
+            if best is None:
+                raise RuntimeError(f"ClassIV {self.id}: could not find any feasible configuration (no valid circle intersections).")
+            phi_star = best[1]
+        else:
+            a, b = bracket
+            if a == b:
+                phi_star = a
+            else:
+                fa, _ = eval_f(a)
+                fb, _ = eval_f(b)
+                if fa is None or fb is None:
+                    phi_star = best[1]
+                else:
+                    # Bisection
+                    for _ in range(40):
+                        m = 0.5 * (a + b)
+                        fm, _ = eval_f(m)
+                        if fm is None:
+                            # If mid invalid, nudge slightly
+                            m = 0.5 * (m + a)
+                            fm, _ = eval_f(m)
+                            if fm is None:
+                                break
+                        if abs(fm) < 1e-6:
+                            a = b = m
+                            break
+                        if fa * fm < 0:
+                            b = m
+                            fb = fm
+                        else:
+                            a = m
+                            fa = fm
+                    phi_star = 0.5 * (a + b)
+
+        # -----------------------------
+        # 8) Final evaluation at phi_star to SET all point globals
+        # -----------------------------
+        f_final, aux = eval_f(phi_star)
+        if f_final is None:
+            raise RuntimeError(f"ClassIV {self.id}: final phi gave invalid configuration.")
+        # At this point T1 and T2 poses have been solved and all their points updated.
+
+        # Optional: also solve remaining binary pose (nice to have, not required for next groups)
+        # Use the joint points on the binary and the already-updated joint points on ternaries.
+        # Set binary endpoints globals from the joint-matched points on ternaries:
+        Brem_pt1.set_global(T1_rem_pt.x, T1_rem_pt.y)
+        Brem_pt2.set_global(T2_rem_pt.x, T2_rem_pt.y)
+        solve_link_pose_from_two_points(B_rem, Brem_pt1, Brem_pt2)
+
+        # Optional: solve cut binary pose too (after closure)
+        Bcut_pt1.set_global(T1_cut_pt.x, T1_cut_pt.y)
+        Bcut_pt2.set_global(T2_cut_pt.x, T2_cut_pt.y)
+        solve_link_pose_from_two_points(B_cut, Bcut_pt1, Bcut_pt2)
+
+        return
+
 Group.TYPE_MAP = {
     "dyad": Dyad,
+    "classIV": ClassIV,
 }
 
 class Crank:
@@ -957,6 +1271,113 @@ def solve_link_pose_from_two_points(link, p1, p2):
 
     return True
 
+def point_on_link(J, link):
+    """Return the Point2D object on `link` that participates in joint J."""
+    if J.link_i is link:
+        return J.pt_i
+    if J.link_j is link:
+        return J.pt_j
+    return None
+
+def group_side_link_of_external_joint(J, group_links_set):
+    """
+    For an external joint, return the link that is inside the group.
+    We do NOT care what the other link is (ground or moving).
+    """
+    if J.link_i in group_links_set and J.link_j not in group_links_set:
+        return J.link_i
+    if J.link_j in group_links_set and J.link_i not in group_links_set:
+        return J.link_j
+    # If malformed (both in group or both out), still try to handle:
+    if J.link_i in group_links_set:
+        return J.link_i
+    if J.link_j in group_links_set:
+        return J.link_j
+    return None
+
+def rot2(phi, vx, vy):
+    c = math.cos(phi)
+    s = math.sin(phi)
+    return (c*vx - s*vy, s*vx + c*vy)
+
+def dist2(p, q):
+    return math.hypot(p[0]-q[0], p[1]-q[1])
+
+    """
+    Extract (and validate) the topology of a Class IV group.
+
+    Expected (internal+external) degree pattern across the 4 links:
+      - two ternary links: degree 3
+      - two binary links:  degree 2
+
+    Returns a dict with keys that debug_classiv_topology() expects:
+      links, internal_joints, external_joints, degree_by_link,
+      ternaries, binaries, disconnected_binary, disconnected_joint, etc.
+    """
+    # Collect joints inside this group
+    internal_joints = list(group.internal)
+    external_joints = list(group.external)
+    all_group_joints = internal_joints + external_joints
+
+    # Degree count per link in this group (by link id)
+    deg = {lk.id: 0 for lk in group.links}
+
+    for J in all_group_joints:
+        if J.link_i.id in deg:
+            deg[J.link_i.id] += 1
+        if J.link_j.id in deg:
+            deg[J.link_j.id] += 1
+
+    # Optional debug print (keep if useful)
+    ui.messageBox(
+        f"ClassIV {group.id} degrees: " +
+        ", ".join([f"{k}:{v}" for k, v in deg.items()])
+    )
+
+    # Validate degree pattern: must be [2,2,3,3]
+    deg_vals = sorted(deg.values())
+    if deg_vals != [2, 2, 3, 3]:
+        raise RuntimeError(
+            f"ClassIV {group.id}: unexpected degrees.\n"
+            f"Degrees: " + ", ".join([f"{k}:{v}" for k, v in deg.items()])
+        )
+
+    # Split links by degree
+    ternaries = [lk for lk in group.links if deg[lk.id] == 3]
+    binaries  = [lk for lk in group.links if deg[lk.id] == 2]
+
+    # For debug convenience
+    degree_by_link = {lk.id: deg[lk.id] for lk in group.links}
+
+    # Placeholders for Step 3 (disconnect logic not implemented yet)
+    disconnected_binary = None
+    disconnected_joint = None
+
+    return {
+        "links": group.links,
+        "internal_joints": internal_joints,
+        "external_joints": external_joints,
+        "degree_by_link": degree_by_link,   # keyed by link.id
+        "deg": deg,                         # keyed by link.id
+        "ternaries": ternaries,
+        "binaries": binaries,
+        "disconnected_binary": disconnected_binary,
+        "disconnected_joint": disconnected_joint,
+    }
+
+def debug_classiv_topology(group, topo):
+    msg = []
+    msg.append(f"ClassIV {group.id} topology:")
+    msg.append("Links: " + ", ".join([lk.id for lk in topo["links"]]))
+    msg.append("Internal joints: " + ", ".join([J.id for J in topo["internal_joints"]]))
+    msg.append("External joints: " + ", ".join([J.id for J in topo["external_joints"]]))
+    msg.append("Degrees (internal only): " + ", ".join([f"{lk.id}:{topo['degree_by_link'][lk.id]}" for lk in topo["links"]]))
+    msg.append("Ternaries: " + ", ".join([lk.id for lk in topo["ternaries"]]))
+    msg.append("Binaries: " + ", ".join([lk.id for lk in topo["binaries"]]))
+    msg.append(f"Disconnected binary: {topo['disconnected_binary'].id}")
+    msg.append(f"Disconnected joint: {topo['disconnected_joint'].id}")
+    ui.messageBox("\n".join(msg))
+
 # Initialize the global variables for the Application and UserInterface objects.
 app = adsk.core.Application.get()
 ui  = app.userInterface
@@ -988,7 +1409,8 @@ def run(context):
         script_dir = os.path.dirname(__file__)
         #json_path = os.path.join(script_dir, "4BARMECH.json")
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        json_path = os.path.join(script_dir, "Theo_Jansen.json")
+        json_path = os.path.join(script_dir, "6BARMECH_STEPHENSON_II.json")
+        #json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
             raw = json.load(f)
@@ -997,11 +1419,6 @@ def run(context):
         mech.postion(theta_crank=0)
         mech.generate()
         mech.connect()
-
-
-
-
-
 
         ui.messageBox(
             "Mechanism parsed successfully!\n\n"
