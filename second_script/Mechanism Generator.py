@@ -263,7 +263,8 @@ class Group:
         # internal/external are LISTS for every group type
         self.internal = internal if internal is not None else []
         self.external = external if external is not None else []
-        self.solution = int(solution)
+        self.solution = solution   # can be int (legacy) OR dict {"circle":..,"phi":..}
+
 
     @staticmethod
     def from_json(group_id, data, links, joints):
@@ -624,114 +625,168 @@ class ClassIV(Group):
         #    - compute cut joint points global and check:
         #          |T1_cut - T2_cut| == L_cut
         # -----------------------------
-        sol_sign = 1 if int(self.solution) >= 0 else -1
+        # solution can be int (legacy) OR dict {"circle": ±1, "phi": 0/1}
+        sol = self.solution
 
-        def eval_f(phi):
-            # Q1 from rotating T1's local vector v1 around P1 global
-            rvx, rvy = rot2(phi, v1x, v1y)
-            Q1x = P1_xy[0] + rvx
-            Q1y = P1_xy[1] + rvy
+        if isinstance(sol, dict):
+            sol_sign = +1 if int(sol.get("circle", 1)) >= 0 else -1
+            phi_idx  = int(sol.get("phi", 0))
+        else:
+            # legacy behavior (your old JSON where solution was +/- 1)
+            sol_sign = +1 if int(sol) >= 0 else -1
+            phi_idx  = 0
 
-            # Solve Q2 from intersection of circles:
-            # circle 1: center Q1 radius L_rem
-            # circle 2: center P2 radius r2
-            sol = circle_circle_intersection(Q1x, Q1y, L_rem, P2_xy[0], P2_xy[1], r2, solution=sol_sign)
-            if sol is None:
-                return None, None  # invalid phi (no assembly)
-            Q2x, Q2y = sol
+        def eval_f(phi, commit=False):
+            # Snapshot BEFORE mutation (for pure evaluation during scanning)
+            snaps = snapshot_many([T1, T2, B_cut, B_rem])
 
-            # Set globals for the two defining points on T1, solve its pose
-            T1_ext_pt = P1_local
-            T1_ext_pt.set_global(P1_xy[0], P1_xy[1])
-            T1_rem_pt.set_global(Q1x, Q1y)
-            ok1 = solve_link_pose_from_two_points(T1, T1_ext_pt, T1_rem_pt)
-            if not ok1:
-                return None, None
+            try:
+                # Q1 from rotating T1's local vector v1 around P1 global
+                rvx, rvy = rot2(phi, v1x, v1y)
+                Q1x = P1_xy[0] + rvx
+                Q1y = P1_xy[1] + rvy
 
-            # Set globals for the two defining points on T2, solve its pose
-            T2_ext_pt = P2_local
-            T2_ext_pt.set_global(P2_xy[0], P2_xy[1])
-            T2_rem_pt.set_global(Q2x, Q2y)
-            ok2 = solve_link_pose_from_two_points(T2, T2_ext_pt, T2_rem_pt)
-            if not ok2:
-                return None, None
+                # Solve Q2 from intersection of circles:
+                sol_cc = circle_circle_intersection(
+                    Q1x, Q1y, L_rem,
+                    P2_xy[0], P2_xy[1], r2,
+                    solution=sol_sign
+                )
+                if sol_cc is None:
+                    return None, None
+                Q2x, Q2y = sol_cc
 
-            # Now cut joint points on ternaries have global coords
-            d = math.hypot(T1_cut_pt.x - T2_cut_pt.x, T1_cut_pt.y - T2_cut_pt.y)
-            return (d - L_cut), (Q1x, Q1y, Q2x, Q2y)
+                # Solve pose of T1 from its external pivot and rem joint
+                T1_ext_pt = P1_local
+                T1_ext_pt.set_global(P1_xy[0], P1_xy[1])
+                T1_rem_pt.set_global(Q1x, Q1y)
+                ok1 = solve_link_pose_from_two_points(T1, T1_ext_pt, T1_rem_pt)
+                if not ok1:
+                    return None, None
 
+                # Solve pose of T2 from its external pivot and rem joint
+                T2_ext_pt = P2_local
+                T2_ext_pt.set_global(P2_xy[0], P2_xy[1])
+                T2_rem_pt.set_global(Q2x, Q2y)
+                ok2 = solve_link_pose_from_two_points(T2, T2_ext_pt, T2_rem_pt)
+                if not ok2:
+                    return None, None
+
+                # Closure error on cut binary length
+                d = math.hypot(T1_cut_pt.x - T2_cut_pt.x, T1_cut_pt.y - T2_cut_pt.y)
+                fval = d - L_cut
+
+                return fval, (Q1x, Q1y, Q2x, Q2y)
+
+            finally:
+                # Restore unless this evaluation is meant to "commit" the final pose
+                if not commit:
+                    restore_many(snaps)
         # -----------------------------
-        # 7) Find phi that makes f(phi)=0
-        #    Simple scan for a bracket, then bisection
+        # 7) Find ALL phi roots where f(phi)=0, then select by phi_idx
         # -----------------------------
-        samples = 90
+        samples = 1440  # denser sampling to avoid missing roots
         phis = [2.0 * math.pi * i / samples for i in range(samples + 1)]
-        vals = []
-        best = None  # (absf, phi, aux)
-        for phi in phis:
-            f, aux = eval_f(phi)
-            if f is None:
-                vals.append(None)
-                continue
-            vals.append(f)
-            af = abs(f)
-            if best is None or af < best[0]:
-                best = (af, phi, aux)
 
-        # Try to bracket a sign change
-        bracket = None
+        vals = []
+        for phi in phis:
+            f, _ = eval_f(phi)
+            vals.append(f)
+
+        # Collect all brackets (sign-change + near-zero + touch roots)
+        brackets = []
+        eps = 1e-6
+
         for i in range(samples):
             f0 = vals[i]
-            f1 = vals[i+1]
+            f1 = vals[i + 1]
             if f0 is None or f1 is None:
                 continue
-            if f0 == 0.0:
-                bracket = (phis[i], phis[i])
-                break
-            if f0 * f1 < 0:
-                bracket = (phis[i], phis[i+1])
-                break
 
-        if bracket is None:
-            # No sign change found; use the best phi we saw (closest closure)
-            if best is None:
-                raise RuntimeError(f"ClassIV {self.id}: could not find any feasible configuration (no valid circle intersections).")
-            phi_star = best[1]
-        else:
-            a, b = bracket
+            # endpoint near-zero checks
+            if abs(f0) < eps:
+                brackets.append((phis[i], phis[i]))
+                continue
+            if abs(f1) < eps:
+                brackets.append((phis[i+1], phis[i+1]))
+                continue
+
+            # sign-change bracket
+            if f0 * f1 < 0:
+                brackets.append((phis[i], phis[i + 1]))
+                continue
+
+            # TOUCH root detection: check midpoint
+            m = 0.5 * (phis[i] + phis[i + 1])
+            fm, _ = eval_f(m)
+            if fm is not None and abs(fm) < eps:
+                brackets.append((phis[i], phis[i + 1]))
+
+
+        def bisect_root(a, b, iters=50):
             if a == b:
-                phi_star = a
-            else:
-                fa, _ = eval_f(a)
-                fb, _ = eval_f(b)
-                if fa is None or fb is None:
-                    phi_star = best[1]
+                return a
+            fa, _ = eval_f(a)
+            fb, _ = eval_f(b)
+            if fa is None or fb is None:
+                return None
+            for _ in range(iters):
+                m = 0.5 * (a + b)
+                fm, _ = eval_f(m)
+                if fm is None:
+                    return None
+                if abs(fm) < 1e-8:
+                    return m
+                if fa * fm < 0:
+                    b = m
+                    fb = fm
                 else:
-                    # Bisection
-                    for _ in range(40):
-                        m = 0.5 * (a + b)
-                        fm, _ = eval_f(m)
-                        if fm is None:
-                            # If mid invalid, nudge slightly
-                            m = 0.5 * (m + a)
-                            fm, _ = eval_f(m)
-                            if fm is None:
-                                break
-                        if abs(fm) < 1e-6:
-                            a = b = m
-                            break
-                        if fa * fm < 0:
-                            b = m
-                            fb = fm
-                        else:
-                            a = m
-                            fa = fm
-                    phi_star = 0.5 * (a + b)
+                    a = m
+                    fa = fm
+            return 0.5 * (a + b)
+
+        # Solve each bracket and deduplicate roots
+        roots = []
+        for a, b in brackets:
+            r = bisect_root(a, b)
+            if r is None:
+                continue
+            r = r % (2.0 * math.pi)
+            # dedup with wrap-around tolerance
+            if all(abs(((r - rr + math.pi) % (2*math.pi)) - math.pi) > 1e-3 for rr in roots):
+                roots.append(r)
+
+        roots.sort()
+
+        ui.messageBox(
+            f"ClassIV {self.id}\n"
+            f"circle={sol_sign}\n"
+            f"roots found = {len(roots)}\n"
+            f"roots (deg) = {[round(r*180/math.pi, 3) for r in roots]}"
+        )
+
+        if len(roots) == 0:
+            raise RuntimeError(f"ClassIV {self.id}: no closure roots found for circle={sol_sign}")
+
+        # Only allow phi = 0 or 1
+        if phi_idx not in (0, 1):
+            raise RuntimeError(f"ClassIV {self.id}: phi must be 0 or 1 (got {phi_idx})")
+
+        if phi_idx >= len(roots):
+            raise RuntimeError(
+                f"ClassIV {self.id}: requested phi={phi_idx} but only {len(roots)} root(s) exist for circle={sol_sign}. "
+                f"Roots (rad): {['{:.6f}'.format(r) for r in roots]}"
+            )
+
+        phi_star = roots[phi_idx]
+
+        #ui.messageBox(f"ClassIV {self.id}: circle={sol_sign}, phi_idx={phi_idx}, roots={len(roots)}")
+
 
         # -----------------------------
         # 8) Final evaluation at phi_star to SET all point globals
         # -----------------------------
-        f_final, aux = eval_f(phi_star)
+        f_final, aux = eval_f(phi_star, commit=True)
         if f_final is None:
             raise RuntimeError(f"ClassIV {self.id}: final phi gave invalid configuration.")
         # At this point T1 and T2 poses have been solved and all their points updated.
@@ -1303,68 +1358,6 @@ def rot2(phi, vx, vy):
 def dist2(p, q):
     return math.hypot(p[0]-q[0], p[1]-q[1])
 
-    """
-    Extract (and validate) the topology of a Class IV group.
-
-    Expected (internal+external) degree pattern across the 4 links:
-      - two ternary links: degree 3
-      - two binary links:  degree 2
-
-    Returns a dict with keys that debug_classiv_topology() expects:
-      links, internal_joints, external_joints, degree_by_link,
-      ternaries, binaries, disconnected_binary, disconnected_joint, etc.
-    """
-    # Collect joints inside this group
-    internal_joints = list(group.internal)
-    external_joints = list(group.external)
-    all_group_joints = internal_joints + external_joints
-
-    # Degree count per link in this group (by link id)
-    deg = {lk.id: 0 for lk in group.links}
-
-    for J in all_group_joints:
-        if J.link_i.id in deg:
-            deg[J.link_i.id] += 1
-        if J.link_j.id in deg:
-            deg[J.link_j.id] += 1
-
-    # Optional debug print (keep if useful)
-    ui.messageBox(
-        f"ClassIV {group.id} degrees: " +
-        ", ".join([f"{k}:{v}" for k, v in deg.items()])
-    )
-
-    # Validate degree pattern: must be [2,2,3,3]
-    deg_vals = sorted(deg.values())
-    if deg_vals != [2, 2, 3, 3]:
-        raise RuntimeError(
-            f"ClassIV {group.id}: unexpected degrees.\n"
-            f"Degrees: " + ", ".join([f"{k}:{v}" for k, v in deg.items()])
-        )
-
-    # Split links by degree
-    ternaries = [lk for lk in group.links if deg[lk.id] == 3]
-    binaries  = [lk for lk in group.links if deg[lk.id] == 2]
-
-    # For debug convenience
-    degree_by_link = {lk.id: deg[lk.id] for lk in group.links}
-
-    # Placeholders for Step 3 (disconnect logic not implemented yet)
-    disconnected_binary = None
-    disconnected_joint = None
-
-    return {
-        "links": group.links,
-        "internal_joints": internal_joints,
-        "external_joints": external_joints,
-        "degree_by_link": degree_by_link,   # keyed by link.id
-        "deg": deg,                         # keyed by link.id
-        "ternaries": ternaries,
-        "binaries": binaries,
-        "disconnected_binary": disconnected_binary,
-        "disconnected_joint": disconnected_joint,
-    }
-
 def debug_classiv_topology(group, topo):
     msg = []
     msg.append(f"ClassIV {group.id} topology:")
@@ -1377,6 +1370,28 @@ def debug_classiv_topology(group, topo):
     msg.append(f"Disconnected binary: {topo['disconnected_binary'].id}")
     msg.append(f"Disconnected joint: {topo['disconnected_joint'].id}")
     ui.messageBox("\n".join(msg))
+
+def snapshot_link_globals(link):
+    """Return dict {pt_name: (x,y)} for this link."""
+    snap = {}
+    for name, p in link.pts.items():
+        snap[name] = (p.x, p.y)
+    return snap
+
+def restore_link_globals(link, snap):
+    """Restore globals from snapshot dict."""
+    for name, (x, y) in snap.items():
+        p = link.pts[name]
+        # Restore exactly (including None)
+        p.x = x
+        p.y = y
+
+def snapshot_many(links):
+    return {lk: snapshot_link_globals(lk) for lk in links}
+
+def restore_many(snaps):
+    for lk, snap in snaps.items():
+        restore_link_globals(lk, snap)
 
 # Initialize the global variables for the Application and UserInterface objects.
 app = adsk.core.Application.get()
