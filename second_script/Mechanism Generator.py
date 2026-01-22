@@ -68,7 +68,7 @@ class Link:
             pts=pts
         )
 
-    def generate(self,geometry):
+    def generate(self,joints,geometry):
         global root_comp  # use global design component
 
         # 1) Collect points with global coordinates
@@ -77,6 +77,14 @@ class Link:
             return
 
         pts_xy = [(p.x, p.y) for p in global_pts]
+        names=self.pts.keys()
+        hole_type=[]
+        for name in names:
+            if name[-1]=='*':
+                hole_type.append(1)
+            else:
+                hole_type.append(0)
+
         # 2) Radii and thickness (tune as you like)
         link_radius    = geometry.link_radius   # outer pad radius
         hole_radius    = geometry.hole_radius # joint hole
@@ -96,6 +104,8 @@ class Link:
         base_plane  = comp.xYConstructionPlane
         plane_index = getattr(self, "plane", 0)
 
+        #ui.messageBox(f'{joints}')
+
         if plane_index == 0:
             sketch_plane = base_plane
         else:
@@ -109,10 +119,11 @@ class Link:
         sketch = comp.sketches.add(sketch_plane)
 
         # 6) Circles at joints (outer stored for outline building)
-        if plane_index%1==0: #on even planes create circular holes
-            outer_circles = create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius)
-        else:
-            ui.messageBox("error: plane index must be an integer")
+        outer_circles = create_joint_circles(comp, hole_type,sketch, pts_xy, link_radius, hole_radius)
+        # if plane_index%1==0: #on even planes create circular holes
+        #     outer_circles = create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius)
+        # else:
+        #     ui.messageBox("error: plane index must be an integer")
 
         #TODO potential bug here- what if a joint is created between two links that are not in ajacent planes (say planes 0 and 2?) then both holes will be circular
 
@@ -142,6 +153,7 @@ class Joint:
     @property
     def pt_i(self):
         return self.link_i.pts[self.pt_i_name]
+
 
     @property
     def pt_j(self):
@@ -183,8 +195,10 @@ class Joint:
 
         sketch = comp.sketches.add(sketch_plane)
 
+        square_peg_edge_length=5
+
         #key dims
-        width=5
+        width=square_peg_edge_length
         snap_thickness=1.5
         tab_length=1
         tab_height=2
@@ -238,7 +252,7 @@ class Joint:
         lines.addByTwoPoints(p1m,p1)
 
         extrudes = comp.features.extrudeFeatures
-        distance = adsk.core.ValueInput.createByReal(geometry.link_thickness)
+        distance = adsk.core.ValueInput.createByReal(square_peg_edge_length)
 
 
         ext_input = extrudes.createInput(
@@ -323,12 +337,24 @@ class Dyad(Group):
             joint = self.internal[0]
 
             # internal joint must use same point label on both links
+
             name_i = joint.pt_i_name
             name_j = joint.pt_j_name
 
+
+            #todo: fix this mess
             if name_i != name_j:
-                raise RuntimeError(
+                if len(name_i) > len(name_j):
+                    name_i, name_j = name_j, name_i
+                if name_j == name_i+'*':
+                    pass
+                else:
+                    raise RuntimeError(
                     f"Joint {joint.id}: mismatched point labels {name_i} vs {name_j}"
+                    )
+            if name_i[-1]=='*' and name_j[-1]=='*':
+                ui.messageBox(
+                    f"WARNING: Joint {joint.id}- Both joints end in '*' and will not be able to rotate. Please revise"
                 )
 
             pivot_name = name_i
@@ -338,7 +364,10 @@ class Dyad(Group):
                 p.set_global(p.u, p.v)
 
             # Global pivot on ground
-            p_g = ground_link.pts[pivot_name]
+            try:
+                p_g = ground_link.pts[pivot_name]
+            except:
+                p_g = ground_link.pts[pivot_name+'*']
             xg, yg = p_g.x, p_g.y
 
             # Local pivot on crank
@@ -834,7 +863,7 @@ class Crank:
         return Crank(link, joint, theta0)
 
 class Geometry:
-    def __init__(self, link_radius    = 0.5 , hole_radius    = 0.25, link_thickness = 0.5 ):
+    def __init__(self, link_radius    = 0.5 ,hole_radius=3.75, link_thickness = 0.5 ):
 
         self.link_radius = float(link_radius)
         self.hole_radius = float(hole_radius)
@@ -844,8 +873,10 @@ class Geometry:
     @staticmethod
     def from_json(raw_geometry):
         link_radius = raw_geometry.get("link_radius", 0.5)
-        hole_radius = raw_geometry.get("hole_radius", 0.25)
+        hole_radius = 3.75
         link_thickness = raw_geometry.get("link_thickness", 0.5)
+        if link_radius<5:
+            ui.messageBox('WARNING! Link Radius must be greater than 5')
         return Geometry(link_radius,hole_radius,link_thickness)
 
 class Mechanism:
@@ -913,7 +944,7 @@ class Mechanism:
         This is a stub for now.
         """
         for link in self.links.values():   
-            link.generate(self.geometry)
+            link.generate(self.joints, self.geometry)
 
     def connect(self):
         """
@@ -1034,18 +1065,32 @@ def outer_tangent_segment(p1, p2, cx, cy, radius):
     t2 = (x2 + nx * radius, y2 + ny * radius)
     return t1, t2
 
-def create_joint_circles(comp,sketch, pts_xy, link_radius, hole_radius):
+def create_joint_circles(comp,hole_type,sketch, pts_xy, link_radius, hole_radius):
     """
     Draw outer + inner circles at joint centers.
     Returns dict[(x,y)] -> outer SketchCircle.
     """
+    x=pts_xy[0]
+    y=pts_xy[1]
     circles = sketch.sketchCurves.sketchCircles
+    rectangle=sketch.sketchCurves.sketchLines
     outer_circles = {}
+    idx=0
     for (x, y) in pts_xy:
-        center = adsk.core.Point3D.create(x, y, 0)
-        outer = circles.addByCenterRadius(center, link_radius)
-        outer_circles[(x, y)] = outer
-        circles.addByCenterRadius(center, hole_radius)
+        if hole_type[idx]==0:
+            center = adsk.core.Point3D.create(x, y, 0)
+            outer = circles.addByCenterRadius(center, link_radius)
+            outer_circles[(x, y)] = outer
+            circles.addByCenterRadius(center, hole_radius)
+        if hole_type[idx]==1:
+            distance = 5.125  # if we change the hole radius, this should change as well
+            center = adsk.core.Point3D.create(x, y, 0)
+            corner1 = adsk.core.Point3D.create(x + distance / 2, y + distance / 2, 0)
+            corner2 = adsk.core.Point3D.create(x - distance / 2, y - distance / 2, 0)
+            outer = circles.addByCenterRadius(center, link_radius)
+            outer_circles[(x, y)] = outer
+            rectangle.addTwoPointRectangle(corner1, corner2)
+        idx+=1
     return outer_circles
 
 def create_joint_squares(sketch,pts_xy, link_radius, hole_radius):
@@ -1061,7 +1106,6 @@ def create_joint_squares(sketch,pts_xy, link_radius, hole_radius):
     for (x, y) in pts_xy:
         distance=5.125 #if we change the hole radius, this should change as well
         center = adsk.core.Point3D.create(x, y, 0)
-        center2= adsk.core.Point3D.create(x, y, 1)
 
         # axisInput.setByTwoPoints(center, center2)
         # axes.add(axisInput)
@@ -1422,9 +1466,9 @@ def run(context):
         # Load external JSON file
         # -------------------------------
         script_dir = os.path.dirname(__file__)
-        #json_path = os.path.join(script_dir, "4BARMECH.json")
+        json_path = os.path.join(script_dir, "4BARMECH.json")
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        json_path = os.path.join(script_dir, "6BARMECH_STEPHENSON_II.json")
+        #json_path = os.path.join(script_dir, "6BARMECH_STEPHENSON_II.json")
         #json_path = os.path.join(script_dir, "Theo_Jansen.json")
 
         with open(json_path, "r") as f:
