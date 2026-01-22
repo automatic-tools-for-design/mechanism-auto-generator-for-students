@@ -1484,13 +1484,11 @@ def run(context):
             "Links:   {}\n"
             "Joints:  {}\n"
             "Dyads:   {}\n"
-            "Crank:   {}\n"
-            "Crank A: {}\n".format(
+            "Crank:   {}\n".format(
                 len(mech.links),
                 len(mech.joints),
                 len(mech.groups),
                 "Yes" if mech.crank is not None else "No",
-                str(mech.crank.link.pts["A"].x) + ", " + str(mech.crank.link.pts["A"].y) if mech.crank is not None else "N/A"
             )
         )
 
