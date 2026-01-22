@@ -52,6 +52,6 @@
   },
   "GEOMETRY": {
     "link_radius": 5,
-    "link_thickness": 7.5
+    "link_thickness": 20
   }
 }

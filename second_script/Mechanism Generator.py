@@ -204,7 +204,7 @@ class Joint:
         tab_height=2
         radius=1
         base_height=1+geometry.link_thickness*num_links
-        length_to_tab=7.625+geometry.link_thickness*num_links
+        length_to_tab=geometry.link_thickness*(num_links+1)+.125
         #location to put pin
         starting_x=-25-10*idx
         starting_y=0
