@@ -1458,80 +1458,56 @@ def restore_many(snaps):
 app = adsk.core.Application.get()
 ui  = app.userInterface
 
-def run(context):
-    global design, root_comp
-    try:
-        # We don't need the design yet; just ensure Fusion is running.
-        if not app.activeProduct:
-            ui.messageBox("No active product. Open a design or assembly first.")
-            return
-        
-        # Get active design
+# ============================================================
+# PUBLIC API (called by MechanismGenerator.py)
+# Keep these names stable so minifier can preserve them.
+# ============================================================
+
+def run_with_json(json_path, theta_crank=0):
+    """
+    Load mechanism JSON, solve positions, generate geometry, connect joints.
+    Returns (mech, root_comp).
+    """
+    global design, root_comp, app, ui
+
+    # Make sure Fusion is running and a design is open
+    if not app.activeProduct:
+        raise RuntimeError("No active product. Open a design or assembly first.")
+
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if not design:
+        raise RuntimeError("No active Fusion design open.")
+
+    root_comp = design.rootComponent
+
+    # Load JSON and build mechanism
+    with open(json_path, "r") as f:
+        raw = json.load(f)
+
+    mech = Mechanism.from_json(raw)
+
+    # Solve + build
+    mech.postion(theta_crank=float(theta_crank))
+    mech.generate()
+    mech.connect()
+
+    return mech, root_comp
+
+
+def export_all_stl(root_comp, downloads_path):
+    """
+    Export all occurrences as STL to downloads_path.
+    """
+    global design, app
+
+    if design is None:
         design = adsk.fusion.Design.cast(app.activeProduct)
-        if not design:
-            ui.messageBox("No active Fusion design open.")
-            return
 
-        root_comp = design.rootComponent
+    exportMgr = design.exportManager
+    allOccu = root_comp.allOccurrences
 
-        if platform.system() == 'Windows':
-            downloads_path = os.path.join(os.getenv('USERPROFILE'), 'Downloads')
-        else:
-            downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
-        # -------------------------------
-        # Load external JSON file
-        # Load external JSON file
-        # -------------------------------
-        script_dir = os.path.dirname(__file__)
-        #json_path = os.path.join(script_dir, "4BARMECH.json")
-        #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
-        #json_path = os.path.join(script_dir, "6BARMECH_STEPHENSON_II.json")
-        json_path = os.path.join(script_dir, "Theo_Jansen.json")
-
-        with open(json_path, "r") as f:
-            raw = json.load(f)
-        mech = Mechanism.from_json(raw)
-       
-        mech.postion(theta_crank=0)
-        mech.generate()
-        mech.connect()
-
-        ui.messageBox(
-            "Mechanism parsed successfully!\n\n"
-            "Links:   {}\n"
-            "Joints:  {}\n"
-            "Dyads:   {}\n"
-            "Crank:   {}\n".format(
-                len(mech.links),
-                len(mech.joints),
-                len(mech.groups),
-                "Yes" if mech.crank is not None else "No",
-            )
-        )
-
-
-        result = ui.messageBox(
-            "Do you want to Export STL files of your all parts to the Downloads folder?",
-            "Export STL files",
-            adsk.core.MessageBoxButtonTypes.YesNoButtonType
-        )
-
-        if result==2:
-            # create a single exportManager instance
-            exportMgr = design.exportManager
-            allOccu = root_comp.allOccurrences
-            for occ in allOccu:
-                fileName = downloads_path + "/" + occ.component.name
-
-                # create stl exportOptions
-                stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
-                stlExportOptions.sendToPrintUtility = False
-
-                exportMgr.execute(stlExportOptions)
-            ui.messageBox(f'Files exported - script complete')
-        elif result==3:
-            ui.messageBox(f'Script complete')
-    except:  
-        if ui:
-            ui.messageBox("Error:\n{}".format(traceback.format_exc()))
-
+    for occ in allOccu:
+        fileName = os.path.join(downloads_path, occ.component.name)
+        stlExportOptions = exportMgr.createSTLExportOptions(occ, fileName)
+        stlExportOptions.sendToPrintUtility = False
+        exportMgr.execute(stlExportOptions)

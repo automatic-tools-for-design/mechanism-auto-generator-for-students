@@ -1,0 +1,1 @@
+python -m python_minifier core.py --rename-globals --remove-literal-statements --remove-asserts --preserve-globals=run_with_json,export_all_stl --output core_obf.py
