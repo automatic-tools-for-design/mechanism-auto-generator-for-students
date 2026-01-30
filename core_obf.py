@@ -264,13 +264,13 @@ def r(p1,p2,cx,cy,radius):
 	else:J=H;K=I
 	T=C+J*A,D+K*A;U=E+J*A,F+K*A;return T,U
 def s(sketch,pts_xy,socket_types,link_radius,hole_radius):
-	J=sketch;G=hole_radius;H=J.sketchCurves.sketchCircles;L=J.sketchCurves.sketchLines;K={}
-	for((A,C),E)in zip(pts_xy,socket_types):
-		E=(E or D).upper();I=adsk.core.Point3D.create(A,C,0);M=H.addByCenterRadius(I,link_radius);K[A,C]=M
-		if E==D:H.addByCenterRadius(I,G)
-		elif E=='S':F=G/B.sqrt(2.);N=adsk.core.Point3D.create(A+F,C+F,0);O=adsk.core.Point3D.create(A-F,C-F,0);L.addTwoPointRectangle(N,O)
-		else:H.addByCenterRadius(I,G)
-	return K
+	I=hole_radius;H=sketch;F=H.sketchCurves.sketchCircles;K=H.sketchCurves.sketchLines;J={}
+	for((A,B),C)in zip(pts_xy,socket_types):
+		C=(C or D).upper();G=adsk.core.Point3D.create(A,B,0);L=F.addByCenterRadius(G,link_radius);J[A,B]=L
+		if C==D:F.addByCenterRadius(G,I)
+		elif C=='S':E=5.125/2;M=adsk.core.Point3D.create(A+E,B+E,0);N=adsk.core.Point3D.create(A-E,B-E,0);K.addTwoPointRectangle(M,N)
+		else:F.addByCenterRadius(G,I)
+	return J
 def t(joint):
 	B=joint;C=A;E=A
 	if J(B,'socket_i',D).upper()==D:C=f(B.link_i,B.pt_i)
