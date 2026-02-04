@@ -43,6 +43,8 @@ def run(context):
         #json_path = os.path.join(script_dir, "6BARMECH_WATT_I.json")
         #json_path = os.path.join(script_dir, "6BARMECH_STEPHENSON_II.json")
         #json_path = os.path.join(script_dir, "Theo_Jansen.json")
+        #json_path = os.path.join(script_dir, "your_file.json")
+        #json_path = os.path.join(script_dir, "base.json") #This file has comments and will cause an error if you run it
         # -------------------------------
 
         # Run the obfuscated core
