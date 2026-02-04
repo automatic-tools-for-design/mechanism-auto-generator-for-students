@@ -1,0 +1,151 @@
+{
+  // ============================================================
+  // LINKS
+  // ------------------------------------------------------------
+  // Each key (L1, L2, ...) represents ONE rigid link.
+  //
+  // Student rules:
+  // - You MAY add more links (L5, L6) for 6-bar mechanisms
+  // - You MAY change numeric values in pts
+  // - Do NOT rename "LINKS", "JOINTS", "CRANK", or "GEOMETRY"
+  // - Define pin/joint locations in the LOCAL 2D frame of the link
+  // - Units: mm
+  // ============================================================
+  "LINKS": {
+
+    // ----------------------------------------------------------
+    // Ground / base link (fixed)
+    // ----------------------------------------------------------
+    "L1": {
+      "ground": true,      // true = fixed to world
+      "plane": 0,          // sketch plane index (do not change)
+      "pts": {
+        "J1": [0.0, 0.0],
+        "J4": [50.0, 0.0]   // EDIT HERE: ground link length
+      }
+    },
+
+    // ----------------------------------------------------------
+    // Crank link
+    // ----------------------------------------------------------
+    "L2": {
+      "ground": false,
+      "plane": 1,
+      "pts": {
+        "J1": [0.0, 0.0],
+        "J2": [20.0, 0.0]   // EDIT HERE: crank length
+      }
+    },
+
+    // ----------------------------------------------------------
+    // Coupler / intermediate link
+    // ----------------------------------------------------------
+    "L3": {
+      "ground": false,
+      "plane": 2,
+      "pts": {
+        "J2": [0.0, 0.0],
+        "J3": [40.0, 0.0]
+
+        // For 6-bar mechanisms, add an extra pin here, e.g.:
+        // "J4": [15.0, 15.0]
+      }
+    },
+
+    // ----------------------------------------------------------
+    // Follower link (4-bar)
+    // ----------------------------------------------------------
+    "L4": {
+      "ground": false,
+      "plane": 1,
+      "pts": {
+        "J3": [0.0, 0.0],
+        "J4": [35.0, 0.0]   // EDIT HERE: follower length
+      }
+    }
+
+    // ----------------------------------------------------------
+    // 6-BAR EXTENSION (uncomment when needed)
+    // ----------------------------------------------------------
+    /*
+    ,"L5": {
+      "ground": false,
+      "plane": 3,
+      "pts": {
+        "J4": [0.0, 0.0],
+        "J6": [40.0, 0.0]
+      }
+    },
+
+    "L6": {
+      "ground": false,
+      "plane": 2,
+      "pts": {
+        "J6": [0.0, 0.0],
+        "J7": [50.0, 0.0],
+        "J5": [20.0, -10.0]
+      }
+    }
+    */
+  },
+
+  // ============================================================
+  // JOINTS
+  // ------------------------------------------------------------
+  // Each joint defines a revolute (pin) connection between TWO links.
+  //
+  // Format:
+  //   "Jk": [ ["Li", "pin_on_Li"], ["Lj", "pin_on_Lj"] ]
+  //
+  // Student rules:
+  // - Pin names MUST exist in LINKS.Li.pts
+  // - You MAY add joints (J5, J6, ...) for 6-bar mechanisms
+  // ============================================================
+  "JOINTS": {
+    "J1": [["L1", "J1"], ["L2", "J1"]],
+    "J2": [["L2", "J2"], ["L3", "J2"]],
+    "J3": [["L3", "J3"], ["L4", "J3"]],
+    "J4": [["L4", "J4"], ["L1", "J4"]]
+
+    // 6-bar examples (uncomment with L5/L6):
+    /*
+    ,"J4": [["L3","J4"], ["L5","J4"]],
+    "J5": [["L4","J5"], ["L6","J5"]],
+    "J6": [["L5","J6"], ["L6","J6"]],
+    "J7": [["L1","J4"], ["L6","J7"]]
+    */
+  },
+
+  // ============================================================
+  // GROUPS (optional)
+  // ------------------------------------------------------------
+  // Used by advanced kinematic solvers.
+  // Students typically do NOT edit this.
+  // The generator may ignore this section for sketch creation.
+  // ============================================================
+  "GROUPS": {
+    // Optional / advanced
+  },
+
+  // ============================================================
+  // CRANK
+  // ------------------------------------------------------------
+  // Defines which link drives the mechanism
+  // ============================================================
+  "CRANK": {
+    "link": "L2",     // EDIT HERE: driven link
+    "joint": "J1",    // EDIT HERE: pivot joint
+    "theta0": 0.0
+  },
+
+  // ============================================================
+  // GEOMETRY
+  // ------------------------------------------------------------
+  // Physical dimensions for visualization and 3D printing
+  // ============================================================
+  "GEOMETRY": {
+    "link_radius": 5,
+    "hole_radius": 3.75,
+    "link_thickness": 7.5
+  }
+}
